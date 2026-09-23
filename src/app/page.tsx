@@ -122,26 +122,24 @@ export default function LandingPage() {
 
       {/* 최종 CTA */}
       <nav className="flex flex-wrap justify-center gap-3 pb-16 sm:pb-20">
-        <button
-          type="button"
-          disabled
-          title="준비 중입니다"
-          className="flex min-h-11 cursor-not-allowed items-center rounded-md bg-accent px-5 text-small font-medium text-white opacity-50"
+        <Link
+          href="/inquiries"
+          className="flex min-h-11 items-center rounded-md bg-accent px-5 text-small font-medium text-white transition-colors hover:bg-accent-hover"
         >
           문의하기
-        </button>
+        </Link>
         <Link
           href="/videos"
           className="flex min-h-11 items-center rounded-md bg-primary px-5 text-small font-medium text-white transition-colors hover:bg-primary-hover"
         >
           영상 보기
         </Link>
-        <a
-          href="#courses"
+        <Link
+          href="/courses"
           className="flex min-h-11 items-center rounded-md border border-border bg-bg px-5 text-small font-medium text-text transition-colors hover:bg-bg-alt"
         >
-          과정 보기
-        </a>
+          전체 강의 보기
+        </Link>
       </nav>
     </main>
   );
