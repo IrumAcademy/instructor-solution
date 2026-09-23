@@ -5,12 +5,12 @@ const API_BASE_URL =
 export type VideoProvider = "youtube" | "vimeo";
 
 export type Video = {
-  id: string;
+  id: number;
   provider: VideoProvider;
   externalId: string;
   title: string;
   thumbnailUrl: string;
-  courseId: string;
+  courseId: number | null;
 };
 
 // YouTube video IDs and Vimeo video IDs are both short alphanumeric tokens.
@@ -27,7 +27,7 @@ export function embedUrlFor(video: Pick<Video, "provider" | "externalId">): stri
     : `https://player.vimeo.com/video/${video.externalId}`;
 }
 
-function isValidVideo(v: unknown): v is Video {
+export function isValidVideo(v: unknown): v is Video {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Record<string, unknown>;
   if (r.provider !== "youtube" && r.provider !== "vimeo") return false;
@@ -35,10 +35,10 @@ function isValidVideo(v: unknown): v is Video {
     return false;
   }
   return (
-    typeof r.id === "string" &&
+    typeof r.id === "number" &&
     typeof r.title === "string" &&
     typeof r.thumbnailUrl === "string" &&
-    typeof r.courseId === "string"
+    (typeof r.courseId === "number" || r.courseId === null)
   );
 }
 

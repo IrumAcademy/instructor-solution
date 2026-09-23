@@ -9,7 +9,7 @@ export default function VideosPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [videos, setVideos] = useState<Video[]>([]);
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [playingId, setPlayingId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
