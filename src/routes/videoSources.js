@@ -57,6 +57,21 @@ async function syncSource(env, d, instructorId, source, budget) {
   };
 }
 
+router.get('/', requireAuth, async (c) => {
+  const d = db(c.env.DB);
+  const rows = await d
+    .prepare('SELECT provider, channel_id, last_synced_at FROM video_sources WHERE instructor_id = ? ORDER BY provider')
+    .all(c.get('instructorId'));
+
+  return c.json(
+    rows.map((r) => ({
+      provider: r.provider,
+      channelId: r.channel_id,
+      lastSyncedAt: r.last_synced_at,
+    }))
+  );
+});
+
 router.post('/', requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const { provider, channelId } = body || {};
