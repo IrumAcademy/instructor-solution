@@ -2,16 +2,16 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { API_BASE_URL, setToken } from "@/lib/api";
 
-// Mock-only for now — wires to POST /api/auth/login in a follow-up commit
-// once the backend (issue #2, PR #5) merges.
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
@@ -24,7 +24,25 @@ export default function LoginPage() {
     }
 
     setError(null);
-    router.push("/dashboard");
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+        return;
+      }
+      const { token } = (await res.json()) as { token: string };
+      setToken(token);
+      router.push("/dashboard");
+    } catch {
+      setError("일시적인 오류입니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -66,9 +84,10 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="mt-2 flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white transition-colors hover:bg-primary-hover"
+          disabled={submitting}
+          className="mt-2 flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
         >
-          로그인
+          {submitting ? "로그인 중…" : "로그인"}
         </button>
       </form>
     </main>
