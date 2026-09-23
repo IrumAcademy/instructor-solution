@@ -3,7 +3,7 @@ const { db } = require('../db');
 const { requireAuth } = require('../auth');
 const { isNonEmptyString, isOptionalString } = require('../validate');
 
-const router = new Hono();
+const router = new Hono({ strict: false });
 
 async function videoIdsFor(d, courseId) {
   const rows = await d.prepare('SELECT id FROM videos WHERE course_id = ? ORDER BY created_at DESC').all(courseId);

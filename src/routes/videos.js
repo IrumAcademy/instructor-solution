@@ -1,7 +1,7 @@
 const { Hono } = require('hono');
 const { db } = require('../db');
 
-const router = new Hono();
+const router = new Hono({ strict: false });
 
 router.get('/', async (c) => {
   const d = db(c.env.DB);

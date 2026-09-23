@@ -3,7 +3,7 @@ const { db } = require('../db');
 const { verifyPassword, signToken } = require('../auth');
 const { isNonEmptyString } = require('../validate');
 
-const router = new Hono();
+const router = new Hono({ strict: false });
 
 router.post('/login', async (c) => {
   const body = await c.req.json().catch(() => ({}));

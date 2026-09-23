@@ -1,14 +1,14 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import authRoutes from './routes/auth';
-import instructorRoutes from './routes/instructor';
-import videoSourcesRoutes from './routes/videoSources';
-import videosRoutes from './routes/videos';
-import coursesRoutes from './routes/courses';
-import inquiriesRoutes from './routes/inquiries';
+import authRoutes from './routes/auth.js';
+import instructorRoutes from './routes/instructor.js';
+import videoSourcesRoutes from './routes/videoSources.js';
+import videosRoutes from './routes/videos.js';
+import coursesRoutes from './routes/courses.js';
+import inquiriesRoutes from './routes/inquiries.js';
 
-const app = new Hono();
+const app = new Hono({ strict: false });
 
 app.use('*', cors());
 

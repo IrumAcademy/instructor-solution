@@ -3,7 +3,7 @@ const { db } = require('../db');
 const { requireAuth } = require('../auth');
 const { isOptionalString } = require('../validate');
 
-const router = new Hono();
+const router = new Hono({ strict: false });
 
 function toPublic(instructor) {
   return {
