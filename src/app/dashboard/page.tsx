@@ -547,13 +547,26 @@ function ProviderSourceCard({ provider, initial }: { provider: "youtube" | "vime
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(false);
+  // Connecting can succeed (row saved) while the first sync still fails —
+  // the API always answers 201 for that and reports it via `syncError`
+  // instead of an HTTP error status (API-Bee, PR #11). This is a soft
+  // warning on an otherwise-connected card, not the hard `error` banner.
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(initial?.lastSyncedAt ?? null);
+
+  async function refreshStatus() {
+    const res = await fetch(`${API_BASE_URL}/api/video-sources`, { headers: authHeaders() });
+    if (!res.ok) return;
+    const sources = (await res.json()) as VideoSource[];
+    setLastSyncedAt(sources.find((s) => s.provider === provider)?.lastSyncedAt ?? null);
+  }
 
   async function handleConnect(e: FormEvent) {
     e.preventDefault();
     if (!channelId.trim()) return;
     setConnecting(true);
     setError(false);
+    setSyncWarning(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-sources`, {
         method: "POST",
@@ -561,8 +574,10 @@ function ProviderSourceCard({ provider, initial }: { provider: "youtube" | "vime
         body: JSON.stringify({ provider, channelId }),
       });
       if (!res.ok) throw new Error("connect failed");
+      const body = (await res.json()) as { syncError?: string };
       setConnected(true);
-      setLastSyncedAt(new Date().toISOString());
+      if (body.syncError) setSyncWarning(body.syncError);
+      await refreshStatus();
     } catch {
       setError(true);
     } finally {
@@ -572,13 +587,18 @@ function ProviderSourceCard({ provider, initial }: { provider: "youtube" | "vime
 
   async function handleSync() {
     setSyncing(true);
+    setSyncWarning(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-sources/sync`, {
         method: "POST",
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error("sync failed");
-      setLastSyncedAt(new Date().toISOString());
+      const body = (await res.json()) as { results: Array<{ provider: string; error?: string; skipped?: boolean; reason?: string }> };
+      const mine = body.results.find((r) => r.provider === provider);
+      if (mine?.error) setSyncWarning(mine.error);
+      else if (mine?.skipped) setSyncWarning(mine.reason ?? "동기화가 지연되고 있습니다. 잠시 후 다시 시도해주세요.");
+      await refreshStatus();
     } catch {
       setError(true);
     } finally {
@@ -594,6 +614,9 @@ function ProviderSourceCard({ provider, initial }: { provider: "youtube" | "vime
         <p className="rounded-md bg-error/10 px-4 py-3 text-small text-error">
           연동에 실패했습니다. 다시 시도해주세요.
         </p>
+      )}
+      {syncWarning && (
+        <p className="rounded-md bg-warning/10 px-4 py-3 text-small text-warning">동기화 실패: {syncWarning}</p>
       )}
 
       {!connected ? (
