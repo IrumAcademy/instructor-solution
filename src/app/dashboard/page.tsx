@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   dashboardNavItems,
   mockDomain,
@@ -280,9 +281,12 @@ function CoursesTab() {
 }
 
 function YoutubeTab() {
+  const searchParams = useSearchParams();
   const [connected, setConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // OAuth provider redirects back to /dashboard?oauth=error on denial/failure —
+  // same entry point the real integration will use, so it's demoable now via URL.
+  const [failed, setFailed] = useState(searchParams.get("oauth") === "error");
   const [lastSyncedMinutesAgo, setLastSyncedMinutesAgo] = useState(mockYoutubeChannel.lastSyncedMinutesAgo);
 
   function handleConnect() {
