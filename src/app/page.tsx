@@ -24,8 +24,8 @@ export default function LandingPage() {
       </section>
 
       {/* 신뢰지표 스탯바 */}
-      <section className="-mx-4 bg-bg-alt px-4 py-16 sm:-mx-6 sm:px-6 sm:py-20">
-        <div className="mx-auto grid max-w-5xl grid-cols-2 gap-6 sm:grid-cols-4 sm:gap-8">
+      <section className="relative left-1/2 w-screen -translate-x-1/2 bg-bg-alt py-16 sm:py-20">
+        <div className="mx-auto grid max-w-5xl grid-cols-2 gap-6 px-4 sm:grid-cols-4 sm:gap-8 sm:px-6">
           {stats.map((stat) => (
             <div key={stat.label} className="flex flex-col items-center gap-1 text-center">
               <span className="text-h1 font-bold text-primary">
@@ -44,8 +44,8 @@ export default function LandingPage() {
         <p className="mt-4 max-w-3xl text-body text-text-secondary">{instructor.bio}</p>
         <ol className="relative mt-8 flex flex-col gap-8 border-l border-border pl-6">
           {timeline.map((item) => (
-            <li key={item.period}>
-              <span className="absolute -left-[5px] h-2.5 w-2.5 rounded-full bg-primary" />
+            <li key={item.period} className="relative">
+              <span className="absolute -left-[29px] h-2.5 w-2.5 rounded-full bg-primary" />
               <p className="text-small text-text-muted">{item.period}</p>
               <h3 className="text-h3 font-medium text-text">{item.title}</h3>
               <p className="text-body text-text-secondary">{item.description}</p>
