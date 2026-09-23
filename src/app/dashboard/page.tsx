@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { dashboardNavItems, mockTestimonialList, type DashboardTab } from "@/lib/mock-dashboard";
+import { dashboardNavItems, type DashboardTab } from "@/lib/mock-dashboard";
 import { API_BASE_URL, authHeaders, clearToken, getToken } from "@/lib/api";
 
 type Instructor = { name: string; bio: string; avatarUrl: string; tagline: string };
@@ -490,15 +490,43 @@ function CourseForm({
 // issue #2 has no GET /api/video-sources status endpoint, so "connected" only
 // reflects this session's own POST result — a page refresh forgets it. Flagged
 // to API-Bee/PM-Bee; add a status read endpoint to persist this across reloads.
+type VideoSource = { provider: "youtube" | "vimeo"; channelId: string; lastSyncedAt: string | null };
+
+function minutesAgo(isoOrSqlTimestamp: string | null): number {
+  if (!isoOrSqlTimestamp) return 0;
+  // D1 stores this as a SQLite `datetime('now')` string (space-separated, UTC,
+  // no offset) — normalize to ISO-8601 so `Date` parses it as UTC instead of
+  // (incorrectly) local time.
+  const iso = isoOrSqlTimestamp.includes("T") ? isoOrSqlTimestamp : `${isoOrSqlTimestamp.replace(" ", "T")}Z`;
+  const diffMs = Date.now() - new Date(iso).getTime();
+  return Math.max(0, Math.round(diffMs / 60000));
+}
+
 function YoutubeTab() {
   const searchParams = useSearchParams();
+  const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState<"youtube" | "vimeo">("youtube");
   const [channelId, setChannelId] = useState("");
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [failed, setFailed] = useState(searchParams.get("oauth") === "error");
-  const [lastSyncedMinutesAgo, setLastSyncedMinutesAgo] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/video-sources`, { headers: authHeaders() })
+      .then((res) => (res.ok ? (res.json() as Promise<VideoSource[]>) : Promise.reject()))
+      .then((sources) => {
+        const source = sources[0];
+        if (!source) return;
+        setProvider(source.provider);
+        setChannelId(source.channelId);
+        setLastSyncedAt(source.lastSyncedAt);
+        setConnected(true);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   async function handleConnect(e: FormEvent) {
     e.preventDefault();
@@ -513,7 +541,7 @@ function YoutubeTab() {
       });
       if (!res.ok) throw new Error("connect failed");
       setConnected(true);
-      setLastSyncedMinutesAgo(0);
+      setLastSyncedAt(new Date().toISOString());
     } catch {
       setFailed(true);
     } finally {
@@ -529,13 +557,15 @@ function YoutubeTab() {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error("sync failed");
-      setLastSyncedMinutesAgo(0);
+      setLastSyncedAt(new Date().toISOString());
     } catch {
       setFailed(true);
     } finally {
       setSyncing(false);
     }
   }
+
+  if (loading) return <DashboardSkeleton />;
 
   return (
     <div className="flex flex-col gap-6">
@@ -589,7 +619,7 @@ function YoutubeTab() {
                 </span>
               </div>
               <span className="text-caption text-text-muted">
-                마지막 동기화: {syncing ? "동기화 중…" : `${lastSyncedMinutesAgo}분 전`}
+                마지막 동기화: {syncing ? "동기화 중…" : lastSyncedAt ? `${minutesAgo(lastSyncedAt)}분 전` : "-"}
               </span>
             </div>
           </div>
@@ -619,88 +649,203 @@ function YoutubeTab() {
   );
 }
 
-// issue #2 API spec has no /api/testimonials endpoint — stays mock-only until
-// API-Bee/PM-Bee add one.
+type Testimonial = { id: number; quote: string; name: string; course: string };
+type TestimonialDraft = { quote: string; name: string; course: string };
+const emptyTestimonialDraft: TestimonialDraft = { quote: "", name: "", course: "" };
+
 function TestimonialsTab() {
-  const [list, setList] = useState(mockTestimonialList.map((item) => ({ ...item })));
-  const [showSavedToast, setShowSavedToast] = useState(false);
+  const [list, setList] = useState<Testimonial[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | "new" | null>(null);
+  const [draft, setDraft] = useState<TestimonialDraft>(emptyTestimonialDraft);
+  const [saving, setSaving] = useState(false);
 
-  function updateField(index: number, field: "quote" | "name" | "course", value: string) {
-    setList((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/testimonials`)
+      .then((res) => (res.ok ? (res.json() as Promise<Testimonial[]>) : Promise.reject()))
+      .then(setList)
+      .catch(() => setError("후기 목록을 불러오지 못했습니다."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function startCreate() {
+    setDraft(emptyTestimonialDraft);
+    setEditingId("new");
   }
 
-  function removeItem(index: number) {
-    setList((prev) => prev.filter((_, i) => i !== index));
+  function startEdit(item: Testimonial) {
+    setDraft({ quote: item.quote, name: item.name, course: item.course });
+    setEditingId(item.id);
   }
 
-  function addItem() {
-    setList((prev) => [...prev, { quote: "", name: "", course: "" }]);
-  }
-
-  function handleSave(e: FormEvent) {
+  async function submitDraft(e: FormEvent) {
     e.preventDefault();
-    setShowSavedToast(true);
-    setTimeout(() => setShowSavedToast(false), 2000);
+    if (!draft.quote.trim() || !draft.name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (editingId === "new") {
+        const res = await fetch(`${API_BASE_URL}/api/testimonials`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify(draft),
+        });
+        if (!res.ok) throw new Error("create failed");
+        const created = (await res.json()) as Testimonial;
+        setList((prev) => [created, ...prev]);
+      } else if (editingId) {
+        const res = await fetch(`${API_BASE_URL}/api/testimonials/${editingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify(draft),
+        });
+        if (!res.ok) throw new Error("update failed");
+        const updated = (await res.json()) as Testimonial;
+        setList((prev) => prev.map((item) => (item.id === editingId ? updated : item)));
+      }
+      setEditingId(null);
+    } catch {
+      setError("저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setSaving(false);
+    }
   }
+
+  async function handleDelete(id: number) {
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/testimonials/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error("delete failed");
+      setList((prev) => prev.filter((item) => item.id !== id));
+    } catch {
+      setError("삭제하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
+  }
+
+  if (loading) return <DashboardSkeleton />;
 
   return (
-    <form onSubmit={handleSave} className="flex flex-col gap-6 pb-20">
+    <div className="flex flex-col gap-6 pb-20">
       <div className="flex items-center justify-between">
         <h1 className="text-h1 font-bold text-text">후기</h1>
         <button
           type="button"
-          onClick={addItem}
+          onClick={startCreate}
           className="flex h-10 items-center rounded-md bg-primary px-4 text-small font-medium text-white hover:bg-primary-hover"
         >
           + 후기 추가
         </button>
       </div>
 
-      <div className="flex flex-col gap-4">
-        {list.map((item, index) => (
-          <div key={index} className="flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <textarea
-                value={item.quote}
-                onChange={(e) => updateField(index, "quote", e.target.value)}
-                rows={3}
-                placeholder="후기 내용"
-                className="flex-1 rounded-sm border border-border px-3 py-2 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
-              />
-              <button
-                type="button"
-                aria-label="삭제"
-                onClick={() => removeItem(index)}
-                className="text-text-secondary hover:text-error"
-              >
-                ×
-              </button>
-            </div>
-            <div className="flex gap-3">
-              <input
-                value={item.name}
-                onChange={(e) => updateField(index, "name", e.target.value)}
-                placeholder="이름"
-                className="h-9 flex-1 rounded-sm border border-border px-3 text-small text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
-              />
-              <input
-                value={item.course}
-                onChange={(e) => updateField(index, "course", e.target.value)}
-                placeholder="수강 과정"
-                className="h-9 flex-1 rounded-sm border border-border px-3 text-small text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
-              />
-            </div>
-          </div>
-        ))}
-      </div>
+      {error && <p className="text-small text-error">{error}</p>}
 
-      <div className="fixed inset-x-0 bottom-0 flex items-center justify-end gap-3 border-t border-border bg-bg px-4 py-3 md:static md:border-0 md:px-0 md:py-0">
-        {showSavedToast && <span className="text-small text-success">저장되었습니다</span>}
+      {editingId === "new" && (
+        <TestimonialForm draft={draft} setDraft={setDraft} saving={saving} onSubmit={submitDraft} onCancel={() => setEditingId(null)} />
+      )}
+
+      <div className="flex flex-col gap-4">
+        {list.length === 0 && editingId !== "new" && (
+          <p className="text-small text-text-secondary">등록된 후기가 없습니다.</p>
+        )}
+        {list.map((item) =>
+          editingId === item.id ? (
+            <TestimonialForm
+              key={item.id}
+              draft={draft}
+              setDraft={setDraft}
+              saving={saving}
+              onSubmit={submitDraft}
+              onCancel={() => setEditingId(null)}
+            />
+          ) : (
+            <div key={item.id} className="flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <p className="flex-1 text-body text-text">{item.quote}</p>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    aria-label="수정"
+                    onClick={() => startEdit(item)}
+                    className="text-text-secondary hover:text-primary"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="삭제"
+                    onClick={() => handleDelete(item.id)}
+                    className="text-text-secondary hover:text-error"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <span className="text-small text-text-secondary">
+                {item.name}
+                {item.course ? ` · ${item.course}` : ""}
+              </span>
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TestimonialForm({
+  draft,
+  setDraft,
+  saving,
+  onSubmit,
+  onCancel,
+}: {
+  draft: TestimonialDraft;
+  setDraft: (draft: TestimonialDraft) => void;
+  saving: boolean;
+  onSubmit: (e: FormEvent) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-sm">
+      <textarea
+        value={draft.quote}
+        onChange={(e) => setDraft({ ...draft, quote: e.target.value })}
+        rows={3}
+        placeholder="후기 내용"
+        className="rounded-sm border border-border px-3 py-2 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+      />
+      <div className="flex gap-3">
+        <input
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          placeholder="이름"
+          className="h-9 flex-1 rounded-sm border border-border px-3 text-small text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+        />
+        <input
+          value={draft.course}
+          onChange={(e) => setDraft({ ...draft, course: e.target.value })}
+          placeholder="수강 과정"
+          className="h-9 flex-1 rounded-sm border border-border px-3 text-small text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-9 rounded-sm border border-border px-3 text-small font-medium text-text hover:bg-bg-alt"
+        >
+          취소
+        </button>
         <button
           type="submit"
-          className="flex h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white hover:bg-primary-hover"
+          disabled={saving || !draft.quote.trim() || !draft.name.trim()}
+          className="h-9 rounded-sm bg-primary px-3 text-small font-medium text-white hover:bg-primary-hover disabled:opacity-50"
         >
-          저장
+          {saving ? "저장 중…" : "저장"}
         </button>
       </div>
     </form>
