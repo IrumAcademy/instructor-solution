@@ -1,73 +1,136 @@
-const express = require('express');
-const db = require('../db');
+const { Hono } = require('hono');
+const { db } = require('../db');
 const { requireAuth } = require('../auth');
 const youtube = require('../services/youtube');
 const vimeo = require('../services/vimeo');
 const { isNonEmptyString } = require('../validate');
 
-const router = express.Router();
+const router = new Hono({ strict: false });
 
 const PROVIDERS = { youtube, vimeo };
 
-async function syncSource(instructorId, source) {
-  const provider = PROVIDERS[source.provider];
-  const videos = await provider.fetchVideos(source.channel_id);
+// Workers Paid caps D1 queries at 1,000 per invocation (QA finding, PR #9).
+// Leaves headroom for the route's own lookup/update queries across one or
+// more sources in a single /sync call.
+const MAX_D1_WRITES_PER_INVOCATION = 900;
 
-  const upsert = db.prepare(`
-    INSERT INTO videos (instructor_id, provider, external_id, title, thumbnail_url, embed_url)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT (instructor_id, provider, external_id)
-    DO UPDATE SET title = excluded.title, thumbnail_url = excluded.thumbnail_url, embed_url = excluded.embed_url
-  `);
-  for (const v of videos) {
-    upsert.run(instructorId, source.provider, v.externalId, v.title, v.thumbnailUrl, v.embedUrl);
+// Only writes videos not already stored for this instructor+provider, so a
+// channel bigger than one invocation's write budget makes forward progress
+// across repeated /sync calls instead of re-processing the same slice every
+// time. Trade-off: metadata (title/thumbnail) for already-synced videos is
+// not refreshed until they'd otherwise need re-inserting.
+async function syncSource(env, d, instructorId, source, budget) {
+  const provider = PROVIDERS[source.provider];
+  const videos = await provider.fetchVideos(source.channel_id, env);
+
+  const existing = await d
+    .prepare('SELECT external_id FROM videos WHERE instructor_id = ? AND provider = ?')
+    .all(instructorId, source.provider);
+  budget.remaining -= 1;
+  const existingIds = new Set(existing.map((r) => r.external_id));
+  const pending = videos.filter((v) => !existingIds.has(v.externalId));
+
+  // -1 reserves the last_synced_at update below.
+  const writeCount = Math.max(0, Math.min(pending.length, budget.remaining - 1));
+  const toWrite = pending.slice(0, writeCount);
+
+  if (toWrite.length > 0) {
+    const upsert = d.prepare(`
+      INSERT INTO videos (instructor_id, provider, external_id, title, thumbnail_url, embed_url)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (instructor_id, provider, external_id)
+      DO UPDATE SET title = excluded.title, thumbnail_url = excluded.thumbnail_url, embed_url = excluded.embed_url
+    `);
+    for (const v of toWrite) {
+      await upsert.run(instructorId, source.provider, v.externalId, v.title, v.thumbnailUrl, v.embedUrl);
+      budget.remaining -= 1;
+    }
   }
 
-  db.prepare('UPDATE video_sources SET last_synced_at = datetime(\'now\') WHERE id = ?').run(source.id);
-  return videos.length;
+  await d.prepare("UPDATE video_sources SET last_synced_at = datetime('now') WHERE id = ?").run(source.id);
+  budget.remaining -= 1;
+
+  return {
+    syncedVideoCount: toWrite.length,
+    totalVideoCount: videos.length,
+    remainingVideoCount: pending.length - toWrite.length,
+  };
 }
 
-router.post('/', requireAuth, async (req, res) => {
-  const { provider, channelId } = req.body || {};
+router.post('/', requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const { provider, channelId } = body || {};
   if (!['youtube', 'vimeo'].includes(provider) || !isNonEmptyString(channelId, 200)) {
-    return res.status(400).json({ error: 'provider must be "youtube" or "vimeo", channelId must be a non-empty string' });
+    return c.json(
+      { error: 'provider must be "youtube" or "vimeo", channelId must be a non-empty string' },
+      400
+    );
   }
 
-  db.prepare(`
-    INSERT INTO video_sources (instructor_id, provider, channel_id)
-    VALUES (?, ?, ?)
-    ON CONFLICT (instructor_id, provider) DO UPDATE SET channel_id = excluded.channel_id
-  `).run(req.instructorId, provider, channelId);
+  const d = db(c.env.DB);
+  const instructorId = c.get('instructorId');
 
-  const source = db
+  await d
+    .prepare(
+      `INSERT INTO video_sources (instructor_id, provider, channel_id)
+       VALUES (?, ?, ?)
+       ON CONFLICT (instructor_id, provider) DO UPDATE SET channel_id = excluded.channel_id`
+    )
+    .run(instructorId, provider, channelId);
+
+  const source = await d
     .prepare('SELECT * FROM video_sources WHERE instructor_id = ? AND provider = ?')
-    .get(req.instructorId, provider);
+    .get(instructorId, provider);
 
   try {
-    const count = await syncSource(req.instructorId, source);
-    res.status(201).json({ provider, channelId, syncedVideoCount: count });
+    const budget = { remaining: MAX_D1_WRITES_PER_INVOCATION };
+    const { syncedVideoCount, totalVideoCount, remainingVideoCount } = await syncSource(
+      c.env,
+      d,
+      instructorId,
+      source,
+      budget
+    );
+    return c.json({ provider, channelId, syncedVideoCount, totalVideoCount, remainingVideoCount }, 201);
   } catch (err) {
-    res.status(502).json({ error: `Connected but sync failed: ${err.message}` });
+    return c.json({ error: `Connected but sync failed: ${err.message}` }, 502);
   }
 });
 
-router.post('/sync', requireAuth, async (req, res) => {
-  const sources = db.prepare('SELECT * FROM video_sources WHERE instructor_id = ?').all(req.instructorId);
+router.post('/sync', requireAuth, async (c) => {
+  const d = db(c.env.DB);
+  const instructorId = c.get('instructorId');
+  const sources = await d.prepare('SELECT * FROM video_sources WHERE instructor_id = ?').all(instructorId);
   if (sources.length === 0) {
-    return res.status(404).json({ error: 'No video sources connected yet' });
+    return c.json({ error: 'No video sources connected yet' }, 404);
   }
 
+  const budget = { remaining: MAX_D1_WRITES_PER_INVOCATION };
   const results = [];
   for (const source of sources) {
+    if (budget.remaining <= 2) {
+      results.push({
+        provider: source.provider,
+        skipped: true,
+        reason: 'D1 write budget exhausted for this call; call /sync again to continue',
+      });
+      continue;
+    }
     try {
-      const count = await syncSource(req.instructorId, source);
-      results.push({ provider: source.provider, syncedVideoCount: count });
+      const { syncedVideoCount, totalVideoCount, remainingVideoCount } = await syncSource(
+        c.env,
+        d,
+        instructorId,
+        source,
+        budget
+      );
+      results.push({ provider: source.provider, syncedVideoCount, totalVideoCount, remainingVideoCount });
     } catch (err) {
       results.push({ provider: source.provider, error: err.message });
     }
   }
 
-  res.json({ results });
+  return c.json({ results });
 });
 
 module.exports = router;

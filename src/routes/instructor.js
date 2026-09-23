@@ -1,9 +1,9 @@
-const express = require('express');
-const db = require('../db');
+const { Hono } = require('hono');
+const { db } = require('../db');
 const { requireAuth } = require('../auth');
 const { isOptionalString } = require('../validate');
 
-const router = express.Router();
+const router = new Hono({ strict: false });
 
 function toPublic(instructor) {
   return {
@@ -14,38 +14,42 @@ function toPublic(instructor) {
   };
 }
 
-router.get('/', (req, res) => {
-  const instructor = db.prepare('SELECT * FROM instructors ORDER BY id LIMIT 1').get();
-  if (!instructor) return res.status(404).json({ error: 'No instructor found' });
-  res.json(toPublic(instructor));
+router.get('/', async (c) => {
+  const d = db(c.env.DB);
+  const instructor = await d.prepare('SELECT * FROM instructors ORDER BY id LIMIT 1').get();
+  if (!instructor) return c.json({ error: 'No instructor found' }, 404);
+  return c.json(toPublic(instructor));
 });
 
-router.put('/', requireAuth, (req, res) => {
-  const { name, bio, avatarUrl, tagline } = req.body || {};
+router.put('/', requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const { name, bio, avatarUrl, tagline } = body || {};
   if (
     !isOptionalString(name, 100) ||
     !isOptionalString(bio, 5000) ||
     !isOptionalString(avatarUrl, 2000) ||
     !isOptionalString(tagline, 200)
   ) {
-    return res.status(400).json({ error: 'name, bio, avatarUrl, tagline must be strings within length limits' });
+    return c.json({ error: 'name, bio, avatarUrl, tagline must be strings within length limits' }, 400);
   }
 
-  const instructor = db.prepare('SELECT * FROM instructors WHERE id = ?').get(req.instructorId);
-  if (!instructor) return res.status(404).json({ error: 'Instructor not found' });
+  const instructorId = c.get('instructorId');
+  const d = db(c.env.DB);
+  const instructor = await d.prepare('SELECT * FROM instructors WHERE id = ?').get(instructorId);
+  if (!instructor) return c.json({ error: 'Instructor not found' }, 404);
 
-  db.prepare(
-    `UPDATE instructors SET name = ?, bio = ?, avatar_url = ?, tagline = ? WHERE id = ?`
-  ).run(
-    name ?? instructor.name,
-    bio ?? instructor.bio,
-    avatarUrl ?? instructor.avatar_url,
-    tagline ?? instructor.tagline,
-    req.instructorId
-  );
+  await d
+    .prepare('UPDATE instructors SET name = ?, bio = ?, avatar_url = ?, tagline = ? WHERE id = ?')
+    .run(
+      name ?? instructor.name,
+      bio ?? instructor.bio,
+      avatarUrl ?? instructor.avatar_url,
+      tagline ?? instructor.tagline,
+      instructorId
+    );
 
-  const updated = db.prepare('SELECT * FROM instructors WHERE id = ?').get(req.instructorId);
-  res.json(toPublic(updated));
+  const updated = await d.prepare('SELECT * FROM instructors WHERE id = ?').get(instructorId);
+  return c.json(toPublic(updated));
 });
 
 module.exports = router;

@@ -1,0 +1,10 @@
+name = "instructor-solution-api"
+main = "src/index.mjs"
+compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+account_id = "0d16cb762cf701f30cec2e51df24fa8e"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "instructor-solution"
+database_id = "105dd703-4639-4efd-bc57-518184ebdce2"

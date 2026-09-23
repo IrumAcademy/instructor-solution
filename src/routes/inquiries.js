@@ -1,44 +1,47 @@
-const express = require('express');
-const db = require('../db');
+const { Hono } = require('hono');
+const { db } = require('../db');
 const { requireAuth } = require('../auth');
 const { isNonEmptyString, isPositiveInt } = require('../validate');
 
-const router = express.Router();
+const router = new Hono({ strict: false });
 
-router.post('/', (req, res) => {
-  const { name, contact, message, courseId } = req.body || {};
+router.post('/', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const { name, contact, message, courseId } = body || {};
   if (!isNonEmptyString(name, 100) || !isNonEmptyString(contact, 200) || !isNonEmptyString(message, 5000)) {
-    return res.status(400).json({ error: 'name, contact and message must be non-empty strings' });
+    return c.json({ error: 'name, contact and message must be non-empty strings' }, 400);
   }
   if (courseId !== undefined && courseId !== null && !isPositiveInt(courseId)) {
-    return res.status(400).json({ error: 'courseId must be a positive integer' });
+    return c.json({ error: 'courseId must be a positive integer' }, 400);
   }
 
-  const instructor = db.prepare('SELECT id FROM instructors ORDER BY id LIMIT 1').get();
-  if (!instructor) return res.status(404).json({ error: 'No instructor found' });
+  const d = db(c.env.DB);
+  const instructor = await d.prepare('SELECT id FROM instructors ORDER BY id LIMIT 1').get();
+  if (!instructor) return c.json({ error: 'No instructor found' }, 404);
 
   let resolvedCourseId = null;
   if (courseId) {
-    const course = db
+    const course = await d
       .prepare('SELECT id FROM courses WHERE id = ? AND instructor_id = ?')
       .get(courseId, instructor.id);
-    if (!course) return res.status(404).json({ error: 'courseId does not reference an existing course' });
+    if (!course) return c.json({ error: 'courseId does not reference an existing course' }, 404);
     resolvedCourseId = course.id;
   }
 
-  db.prepare(
-    'INSERT INTO inquiries (instructor_id, name, contact, message, course_id) VALUES (?, ?, ?, ?, ?)'
-  ).run(instructor.id, name, contact, message, resolvedCourseId);
+  await d
+    .prepare('INSERT INTO inquiries (instructor_id, name, contact, message, course_id) VALUES (?, ?, ?, ?, ?)')
+    .run(instructor.id, name, contact, message, resolvedCourseId);
 
-  res.status(201).end();
+  return c.body(null, 201);
 });
 
-router.get('/', requireAuth, (req, res) => {
-  const rows = db
+router.get('/', requireAuth, async (c) => {
+  const d = db(c.env.DB);
+  const rows = await d
     .prepare('SELECT * FROM inquiries WHERE instructor_id = ? ORDER BY created_at DESC')
-    .all(req.instructorId);
+    .all(c.get('instructorId'));
 
-  res.json(
+  return c.json(
     rows.map((r) => ({
       id: r.id,
       name: r.name,
