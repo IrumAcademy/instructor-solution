@@ -3,16 +3,29 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { mockInstructor } from "@/lib/mock-instructor";
-import { mockVideos, type Video, type VideoProvider } from "@/lib/mock-videos";
+import { embedUrlFor, fetchVideos, type Video, type VideoProvider } from "@/lib/video-api";
 
-// Mock-only for now — wires to GET /api/videos (issue #2 API spec) in a follow-up commit.
 export default function VideosPage() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [videos, setVideos] = useState<Video[]>([]);
   const [playingId, setPlayingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 400);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    fetchVideos()
+      .then((v) => {
+        if (!cancelled) setVideos(v);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -24,13 +37,17 @@ export default function VideosPage() {
 
       {loading ? (
         <VideoGridSkeleton />
-      ) : mockVideos.length === 0 ? (
+      ) : error ? (
+        <p className="mt-12 text-center text-body text-text-secondary">
+          영상 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
+        </p>
+      ) : videos.length === 0 ? (
         <p className="mt-12 text-center text-body text-text-secondary">
           아직 등록된 영상이 없습니다. 준비 중이니 조금만 기다려주세요.
         </p>
       ) : (
         <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {mockVideos.map((video) => (
+          {videos.map((video) => (
             <VideoCard
               key={video.id}
               video={video}
@@ -58,7 +75,7 @@ function VideoCard({
       <div className="relative aspect-video overflow-hidden rounded-md bg-bg-alt">
         {playing ? (
           <iframe
-            src={video.embedUrl}
+            src={embedUrlFor(video)}
             title={video.title}
             className="h-full w-full"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
