@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
-import { mockCourses } from "@/lib/mock-courses";
+import { API_BASE_URL } from "@/lib/api";
 
 type FieldErrors = {
   name?: string;
@@ -11,9 +11,13 @@ type FieldErrors = {
   consent?: string;
 };
 
-// Mock-only for now — wires to POST /api/inquiries (issue #2 API spec) in a
-// follow-up commit. ?demo=error is reachable for QA review of the server-error
-// banner, mirroring the ?oauth=error convention on /dashboard.
+type Course = {
+  id: string;
+  title: string;
+};
+
+// ?demo=error is reachable for QA review of the server-error banner, mirroring
+// the ?oauth=error convention on /dashboard.
 export default function InquiriesPage() {
   return (
     <Suspense>
@@ -33,8 +37,16 @@ function InquiriesPageContent() {
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">(
     searchParams.get("demo") === "error" ? "error" : "idle",
   );
+  const [courses, setCourses] = useState<Course[]>([]);
 
-  function handleSubmit(e: FormEvent) {
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/courses`)
+      .then((res) => (res.ok ? (res.json() as Promise<Course[]>) : []))
+      .then(setCourses)
+      .catch(() => {});
+  }, []);
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
     const nextErrors: FieldErrors = {};
@@ -46,7 +58,22 @@ function InquiriesPageContent() {
     if (Object.keys(nextErrors).length > 0) return;
 
     setStatus("submitting");
-    setTimeout(() => setStatus("success"), 600);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/inquiries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          contact,
+          message,
+          ...(courseId ? { courseId } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error("submit failed");
+      setStatus("success");
+    } catch {
+      setStatus("error");
+    }
   }
 
   function resetForm() {
@@ -135,7 +162,7 @@ function InquiriesPageContent() {
             className="h-11 rounded-sm border border-border px-3 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
           >
             <option value="">선택 안 함</option>
-            {mockCourses.map((course) => (
+            {courses.map((course) => (
               <option key={course.id} value={course.id}>
                 {course.title}
               </option>
