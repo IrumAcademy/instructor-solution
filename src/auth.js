@@ -1,5 +1,8 @@
+const crypto_node = require('node:crypto');
+
 const TOKEN_TTL_SECONDS = 60 * 60 * 12; // 12h
-const PBKDF2_ITERATIONS = 600000; // OWASP PBKDF2-HMAC-SHA256 recommendation; account is on Workers paid plan (30s CPU), not free tier's 10ms
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_N = 16384; // node:crypto scrypt default cost; ~25-35ms (Infra-Bee benchmark), fine on Workers paid plan (30s CPU cap)
 
 function bytesToBase64Url(bytes) {
   let binary = '';
@@ -24,31 +27,22 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-async function pbkdf2(password, salt, iterations) {
-  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
-    'deriveBits',
-  ]);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, keyMaterial, 256);
-  return new Uint8Array(bits);
+function hashPassword(password) {
+  const salt = crypto_node.randomBytes(16).toString('hex');
+  const hash = crypto_node.scryptSync(password, salt, SCRYPT_KEYLEN, { N: SCRYPT_N }).toString('hex');
+  // Cost factor travels with the hash so raising SCRYPT_N later doesn't
+  // break verification for already-stored hashes.
+  return `${SCRYPT_N}:${salt}:${hash}`;
 }
 
-async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
-  // Iteration count travels with the hash so raising PBKDF2_ITERATIONS later
-  // doesn't break verification for already-stored hashes.
-  return `${PBKDF2_ITERATIONS}:${bytesToBase64Url(salt)}:${bytesToBase64Url(hash)}`;
-}
-
-async function verifyPassword(password, storedHash) {
+function verifyPassword(password, storedHash) {
   try {
-    const [iterationsStr, saltB64, hashB64] = storedHash.split(':');
-    const iterations = Number.parseInt(iterationsStr, 10);
-    if (!Number.isInteger(iterations) || iterations <= 0) return false;
-    const salt = base64UrlToBytes(saltB64);
-    const expected = base64UrlToBytes(hashB64);
-    const candidate = await pbkdf2(password, salt, iterations);
-    return timingSafeEqual(candidate, expected);
+    const [nStr, salt, hash] = storedHash.split(':');
+    const n = Number.parseInt(nStr, 10);
+    if (!Number.isInteger(n) || n <= 0) return false;
+    const candidate = crypto_node.scryptSync(password, salt, SCRYPT_KEYLEN, { N: n });
+    const expected = Buffer.from(hash, 'hex');
+    return candidate.length === expected.length && crypto_node.timingSafeEqual(candidate, expected);
   } catch {
     return false;
   }

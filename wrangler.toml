@@ -1,6 +1,8 @@
 name = "instructor-solution-api"
 main = "src/index.js"
 compatibility_date = "2025-07-18"
+compatibility_flags = ["nodejs_compat"]
+account_id = "0d16cb762cf701f30cec2e51df24fa8e"
 
 [[d1_databases]]
 binding = "DB"
