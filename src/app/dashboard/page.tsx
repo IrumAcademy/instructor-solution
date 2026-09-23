@@ -502,37 +502,58 @@ function minutesAgo(isoOrSqlTimestamp: string | null): number {
   return Math.max(0, Math.round(diffMs / 60000));
 }
 
+const PROVIDER_LABELS: Record<"youtube" | "vimeo", string> = { youtube: "YouTube", vimeo: "Vimeo" };
+
+// PM-Bee 2026-09-23: both providers are in scope, each with its own connect/
+// sync/change-channel UI — a strict per-instructor pair, not a pick-one list.
 function YoutubeTab() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [provider, setProvider] = useState<"youtube" | "vimeo">("youtube");
-  const [channelId, setChannelId] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [failed, setFailed] = useState(searchParams.get("oauth") === "error");
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [sources, setSources] = useState<Partial<Record<"youtube" | "vimeo", VideoSource>>>({});
+  const failed = searchParams.get("oauth") === "error";
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/video-sources`, { headers: authHeaders() })
       .then((res) => (res.ok ? (res.json() as Promise<VideoSource[]>) : Promise.reject()))
-      .then((sources) => {
-        const source = sources[0];
-        if (!source) return;
-        setProvider(source.provider);
-        setChannelId(source.channelId);
-        setLastSyncedAt(source.lastSyncedAt);
-        setConnected(true);
+      .then((list) => {
+        setSources(Object.fromEntries(list.map((s) => [s.provider, s])));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
+  if (loading) return <DashboardSkeleton />;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <h1 className="text-h1 font-bold text-text">영상 소스 연동</h1>
+
+      {failed && (
+        <p className="rounded-md bg-error/10 px-4 py-3 text-small text-error">
+          연동에 실패했습니다. 다시 시도해주세요.
+        </p>
+      )}
+
+      {(["youtube", "vimeo"] as const).map((provider) => (
+        <ProviderSourceCard key={provider} provider={provider} initial={sources[provider] ?? null} />
+      ))}
+    </div>
+  );
+}
+
+function ProviderSourceCard({ provider, initial }: { provider: "youtube" | "vimeo"; initial: VideoSource | null }) {
+  const [channelId, setChannelId] = useState(initial?.channelId ?? "");
+  const [connected, setConnected] = useState(!!initial);
+  const [connecting, setConnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(initial?.lastSyncedAt ?? null);
+
   async function handleConnect(e: FormEvent) {
     e.preventDefault();
     if (!channelId.trim()) return;
     setConnecting(true);
-    setFailed(false);
+    setError(false);
     try {
       const res = await fetch(`${API_BASE_URL}/api/video-sources`, {
         method: "POST",
@@ -543,7 +564,7 @@ function YoutubeTab() {
       setConnected(true);
       setLastSyncedAt(new Date().toISOString());
     } catch {
-      setFailed(true);
+      setError(true);
     } finally {
       setConnecting(false);
     }
@@ -559,19 +580,17 @@ function YoutubeTab() {
       if (!res.ok) throw new Error("sync failed");
       setLastSyncedAt(new Date().toISOString());
     } catch {
-      setFailed(true);
+      setError(true);
     } finally {
       setSyncing(false);
     }
   }
 
-  if (loading) return <DashboardSkeleton />;
-
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-h1 font-bold text-text">유튜브 연동</h1>
+    <div className="flex flex-col gap-3">
+      <h2 className="text-h3 font-medium text-text">{PROVIDER_LABELS[provider]}</h2>
 
-      {failed && (
+      {error && (
         <p className="rounded-md bg-error/10 px-4 py-3 text-small text-error">
           연동에 실패했습니다. 다시 시도해주세요.
         </p>
@@ -582,16 +601,10 @@ function YoutubeTab() {
           onSubmit={handleConnect}
           className="flex flex-col items-center gap-4 rounded-md border border-border p-10 text-center"
         >
-          <p className="text-body text-text-secondary">유튜브 채널을 연결하면 영상이 자동으로 동기화됩니다.</p>
+          <p className="text-body text-text-secondary">
+            {PROVIDER_LABELS[provider]} 채널을 연결하면 영상이 자동으로 동기화됩니다.
+          </p>
           <div className="flex w-full max-w-sm flex-col gap-3">
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as "youtube" | "vimeo")}
-              className="h-11 rounded-sm border border-border px-3 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
-            >
-              <option value="youtube">YouTube</option>
-              <option value="vimeo">Vimeo</option>
-            </select>
             <input
               value={channelId}
               onChange={(e) => setChannelId(e.target.value)}
