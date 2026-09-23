@@ -1,30 +1,33 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "next/navigation";
-import {
-  dashboardNavItems,
-  mockDomain,
-  mockProfile,
-  mockTestimonialList,
-  mockYoutubeChannel,
-  type DashboardTab,
-  mockCourseList,
-} from "@/lib/mock-dashboard";
-import { courseLevelBadgeClass } from "@/lib/landing-content";
+import { useRouter, useSearchParams } from "next/navigation";
+import { dashboardNavItems, mockTestimonialList, type DashboardTab } from "@/lib/mock-dashboard";
+import { API_BASE_URL, authHeaders, clearToken, getToken } from "@/lib/api";
 
-// Mock-only for now — wires to /api/instructor, /api/courses, /api/video-sources,
-// /api/domain (issue #2 API spec) in a follow-up commit.
+type Instructor = { name: string; bio: string; avatarUrl: string; tagline: string };
+type Course = { id: string; title: string; description: string; videoIds: string[] };
+
 export default function DashboardPage() {
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTab>("profile");
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 400);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!getToken()) {
+      router.replace("/login");
+      return;
+    }
+    setAuthChecked(true);
+  }, [router]);
 
+  function handleLogout() {
+    clearToken();
+    router.replace("/login");
+  }
+
+  const loading = !authChecked;
   const activeLabel = dashboardNavItems.find((item) => item.id === activeTab)?.label ?? "";
 
   return (
@@ -77,6 +80,13 @@ export default function DashboardPage() {
             {item.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="mt-4 flex h-11 items-center rounded-md px-4 text-left text-body text-text-secondary hover:bg-bg-alt"
+        >
+          로그아웃
+        </button>
       </nav>
 
       <div className="min-w-0 flex-1">
@@ -106,14 +116,35 @@ function DashboardSkeleton() {
   );
 }
 
+// Career tags are a mock-only UI affordance — issue #2's /api/instructor has no
+// field for them, so they're kept as free-form local tags and aren't persisted.
+// Avatar upload also has no backend endpoint yet (spec has no media/upload route);
+// the file picker only updates the local preview until one exists.
 function ProfileTab() {
-  const [name, setName] = useState(mockProfile.name);
-  const [tagline, setTagline] = useState(mockProfile.tagline);
-  const [bio, setBio] = useState(mockProfile.bio);
-  const [tags, setTags] = useState(mockProfile.careerTags);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const [tagline, setTagline] = useState("");
+  const [bio, setBio] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [showSavedToast, setShowSavedToast] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/instructor`)
+      .then((res) => (res.ok ? (res.json() as Promise<Instructor>) : Promise.reject()))
+      .then((data) => {
+        setName(data.name);
+        setTagline(data.tagline);
+        setBio(data.bio);
+        setAvatarUrl(data.avatarUrl);
+      })
+      .catch(() => setError("프로필을 불러오지 못했습니다."))
+      .finally(() => setLoading(false));
+  }, []);
 
   function addTag(e: FormEvent) {
     e.preventDefault();
@@ -132,15 +163,32 @@ function ProfileTab() {
     setAvatarPreview(URL.createObjectURL(file));
   }
 
-  function handleSave(e: FormEvent) {
+  async function handleSave(e: FormEvent) {
     e.preventDefault();
-    setShowSavedToast(true);
-    setTimeout(() => setShowSavedToast(false), 2000);
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/instructor`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ name, tagline, bio, avatarUrl }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      setShowSavedToast(true);
+      setTimeout(() => setShowSavedToast(false), 2000);
+    } catch {
+      setError("저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setSaving(false);
+    }
   }
+
+  if (loading) return <DashboardSkeleton />;
 
   return (
     <form onSubmit={handleSave} className="flex flex-col gap-6 pb-20">
       <h1 className="text-h1 font-bold text-text">프로필</h1>
+      {error && <p className="text-small text-error">{error}</p>}
 
       <div className="flex items-center gap-4">
         <div className="h-20 w-20 overflow-hidden rounded-full bg-bg-alt">
@@ -224,17 +272,94 @@ function ProfileTab() {
         {showSavedToast && <span className="text-small text-success">저장되었습니다</span>}
         <button
           type="submit"
-          className="flex h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white hover:bg-primary-hover"
+          disabled={saving}
+          className="flex h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white hover:bg-primary-hover disabled:opacity-50"
         >
-          저장
+          {saving ? "저장 중…" : "저장"}
         </button>
       </div>
     </form>
   );
 }
 
+type CourseDraft = { title: string; description: string };
+const emptyDraft: CourseDraft = { title: "", description: "" };
+
 function CoursesTab() {
-  const [list, setList] = useState(mockCourseList);
+  const [list, setList] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | "new" | null>(null);
+  const [draft, setDraft] = useState<CourseDraft>(emptyDraft);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/courses`)
+      .then((res) => (res.ok ? (res.json() as Promise<Course[]>) : Promise.reject()))
+      .then(setList)
+      .catch(() => setError("과정 목록을 불러오지 못했습니다."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function startCreate() {
+    setDraft(emptyDraft);
+    setEditingId("new");
+  }
+
+  function startEdit(course: Course) {
+    setDraft({ title: course.title, description: course.description });
+    setEditingId(course.id);
+  }
+
+  async function submitDraft(e: FormEvent) {
+    e.preventDefault();
+    if (!draft.title.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (editingId === "new") {
+        const res = await fetch(`${API_BASE_URL}/api/courses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ title: draft.title, description: draft.description, videoIds: [] }),
+        });
+        if (!res.ok) throw new Error("create failed");
+        const created = (await res.json()) as Course;
+        setList((prev) => [...prev, created]);
+      } else if (editingId) {
+        const res = await fetch(`${API_BASE_URL}/api/courses/${editingId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ title: draft.title, description: draft.description }),
+        });
+        if (!res.ok) throw new Error("update failed");
+        setList((prev) =>
+          prev.map((c) => (c.id === editingId ? { ...c, title: draft.title, description: draft.description } : c)),
+        );
+      }
+      setEditingId(null);
+    } catch {
+      setError("저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/courses/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error("delete failed");
+      setList((prev) => prev.filter((c) => c.id !== id));
+    } catch {
+      setError("삭제하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    }
+  }
+
+  if (loading) return <DashboardSkeleton />;
 
   return (
     <div className="flex flex-col gap-6">
@@ -242,65 +367,165 @@ function CoursesTab() {
         <h1 className="text-h1 font-bold text-text">강의</h1>
         <button
           type="button"
+          onClick={startCreate}
           className="flex h-10 items-center rounded-md bg-primary px-4 text-small font-medium text-white hover:bg-primary-hover"
         >
           + 과정 추가
         </button>
       </div>
 
+      {error && <p className="text-small text-error">{error}</p>}
+
+      {editingId === "new" && (
+        <CourseForm draft={draft} setDraft={setDraft} saving={saving} onSubmit={submitDraft} onCancel={() => setEditingId(null)} />
+      )}
+
       <div className="flex flex-col gap-4">
-        {list.map((course) => (
-          <div
-            key={course.title}
-            className="flex items-start justify-between gap-4 rounded-md border border-border bg-bg p-4 shadow-sm"
-          >
-            <div className="flex flex-col gap-1.5">
-              <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-caption font-medium ${courseLevelBadgeClass(course.level)}`}>
-                {course.level} · {course.duration}
-              </span>
-              <h3 className="text-h3 font-medium text-text">{course.title}</h3>
-              <p className="text-small text-text-secondary">{course.price}</p>
+        {list.length === 0 && editingId !== "new" && (
+          <p className="text-small text-text-secondary">등록된 과정이 없습니다.</p>
+        )}
+        {list.map((course) =>
+          editingId === course.id ? (
+            <CourseForm
+              key={course.id}
+              draft={draft}
+              setDraft={setDraft}
+              saving={saving}
+              onSubmit={submitDraft}
+              onCancel={() => setEditingId(null)}
+            />
+          ) : (
+            <div
+              key={course.id}
+              className="flex items-start justify-between gap-4 rounded-md border border-border bg-bg p-4 shadow-sm"
+            >
+              <div className="flex flex-col gap-1.5">
+                <h3 className="text-h3 font-medium text-text">{course.title}</h3>
+                <p className="text-small text-text-secondary">{course.description}</p>
+                <span className="text-caption text-text-muted">영상 {course.videoIds.length}개 연결됨</span>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  aria-label="수정"
+                  onClick={() => startEdit(course)}
+                  className="text-text-secondary hover:text-primary"
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  aria-label="삭제"
+                  onClick={() => handleDelete(course.id)}
+                  className="text-text-secondary hover:text-error"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <div className="flex shrink-0 gap-2">
-              <button type="button" aria-label="수정" className="text-text-secondary hover:text-primary">
-                ✎
-              </button>
-              <button
-                type="button"
-                aria-label="삭제"
-                onClick={() => setList((prev) => prev.filter((c) => c.title !== course.title))}
-                className="text-text-secondary hover:text-error"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        ))}
+          ),
+        )}
       </div>
     </div>
   );
 }
 
+function CourseForm({
+  draft,
+  setDraft,
+  saving,
+  onSubmit,
+  onCancel,
+}: {
+  draft: CourseDraft;
+  setDraft: (draft: CourseDraft) => void;
+  saving: boolean;
+  onSubmit: (e: FormEvent) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-sm">
+      <input
+        value={draft.title}
+        onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+        placeholder="과정 제목"
+        className="h-10 rounded-sm border border-border px-3 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+      />
+      <textarea
+        value={draft.description}
+        onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+        placeholder="과정 설명"
+        rows={3}
+        className="rounded-sm border border-border px-3 py-2 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+      />
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-9 rounded-sm border border-border px-3 text-small font-medium text-text hover:bg-bg-alt"
+        >
+          취소
+        </button>
+        <button
+          type="submit"
+          disabled={saving || !draft.title.trim()}
+          className="h-9 rounded-sm bg-primary px-3 text-small font-medium text-white hover:bg-primary-hover disabled:opacity-50"
+        >
+          {saving ? "저장 중…" : "저장"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// issue #2 has no GET /api/video-sources status endpoint, so "connected" only
+// reflects this session's own POST result — a page refresh forgets it. Flagged
+// to API-Bee/PM-Bee; add a status read endpoint to persist this across reloads.
 function YoutubeTab() {
   const searchParams = useSearchParams();
+  const [provider, setProvider] = useState<"youtube" | "vimeo">("youtube");
+  const [channelId, setChannelId] = useState("");
   const [connected, setConnected] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  // OAuth provider redirects back to /dashboard?oauth=error on denial/failure —
-  // same entry point the real integration will use, so it's demoable now via URL.
   const [failed, setFailed] = useState(searchParams.get("oauth") === "error");
-  const [lastSyncedMinutesAgo, setLastSyncedMinutesAgo] = useState(mockYoutubeChannel.lastSyncedMinutesAgo);
+  const [lastSyncedMinutesAgo, setLastSyncedMinutesAgo] = useState(0);
 
-  function handleConnect() {
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault();
+    if (!channelId.trim()) return;
+    setConnecting(true);
     setFailed(false);
-    setConnected(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/video-sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ provider, channelId }),
+      });
+      if (!res.ok) throw new Error("connect failed");
+      setConnected(true);
+      setLastSyncedMinutesAgo(0);
+    } catch {
+      setFailed(true);
+    } finally {
+      setConnecting(false);
+    }
   }
 
-  function handleSync() {
+  async function handleSync() {
     setSyncing(true);
-    setTimeout(() => {
-      setSyncing(false);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/video-sources/sync`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error("sync failed");
       setLastSyncedMinutesAgo(0);
-    }, 800);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSyncing(false);
+    }
   }
 
   return (
@@ -314,23 +539,42 @@ function YoutubeTab() {
       )}
 
       {!connected ? (
-        <div className="flex flex-col items-center gap-4 rounded-md border border-border p-10 text-center">
+        <form
+          onSubmit={handleConnect}
+          className="flex flex-col items-center gap-4 rounded-md border border-border p-10 text-center"
+        >
           <p className="text-body text-text-secondary">유튜브 채널을 연결하면 영상이 자동으로 동기화됩니다.</p>
+          <div className="flex w-full max-w-sm flex-col gap-3">
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as "youtube" | "vimeo")}
+              className="h-11 rounded-sm border border-border px-3 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+            >
+              <option value="youtube">YouTube</option>
+              <option value="vimeo">Vimeo</option>
+            </select>
+            <input
+              value={channelId}
+              onChange={(e) => setChannelId(e.target.value)}
+              placeholder="채널 ID"
+              className="h-11 rounded-sm border border-border px-3 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+            />
+          </div>
           <button
-            type="button"
-            onClick={handleConnect}
-            className="flex h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white hover:bg-primary-hover"
+            type="submit"
+            disabled={connecting || !channelId.trim()}
+            className="flex h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white hover:bg-primary-hover disabled:opacity-50"
           >
-            채널 연결하기
+            {connecting ? "연결 중…" : "채널 연결하기"}
           </button>
-        </div>
+        </form>
       ) : (
         <div className="flex items-center justify-between rounded-md border border-border p-4">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-bg-alt" />
             <div className="flex flex-col gap-0.5">
               <div className="flex items-center gap-2">
-                <span className="text-body font-medium text-text">{mockYoutubeChannel.channelName}</span>
+                <span className="text-body font-medium text-text">{channelId}</span>
                 <span className="rounded-full bg-success/10 px-2 py-0.5 text-caption font-medium text-success">
                   연동됨
                 </span>
@@ -349,11 +593,7 @@ function YoutubeTab() {
             >
               지금 동기화
             </button>
-            <button
-              type="button"
-              onClick={() => setConnected(false)}
-              className="text-small font-medium text-error"
-            >
+            <button type="button" onClick={() => setConnected(false)} className="text-small font-medium text-error">
               연동 해제
             </button>
           </div>
@@ -363,76 +603,8 @@ function YoutubeTab() {
   );
 }
 
-// Shelved for now — issue #3 pilot scope excludes custom domains (subdomain only).
-// Not deleted, not exported (page.tsx only allows Next's reserved exports):
-// reusable once the full SaaS multi-tenant domain feature ships.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function DomainTab() {
-  const [customDomain, setCustomDomain] = useState("");
-  const [copied, setCopied] = useState(false);
-  const sslStatus: "pending" | "issuing" | "done" = customDomain ? "pending" : "pending";
-
-  const sslLabel = { pending: "대기중", issuing: "발급중", done: "완료" }[sslStatus];
-  const sslClass = {
-    pending: "bg-warning/10 text-warning",
-    issuing: "bg-primary-light text-primary",
-    done: "bg-success/10 text-success",
-  }[sslStatus];
-
-  async function handleCopy() {
-    await navigator.clipboard.writeText(mockDomain.cnameTarget);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-h1 font-bold text-text">도메인</h1>
-
-      <div className="flex flex-col gap-1.5">
-        <span className="text-small font-medium text-text">기본 제공 서브도메인</span>
-        <span className="font-mono text-body text-text-secondary">{mockDomain.subdomain}</span>
-      </div>
-
-      <hr className="border-border" />
-
-      <div className="flex flex-col gap-3">
-        <span className="text-small font-medium text-text">커스텀 도메인 연결</span>
-        <input
-          value={customDomain}
-          onChange={(e) => setCustomDomain(e.target.value)}
-          placeholder="www.my-domain.com"
-          className="h-11 rounded-sm border border-border px-3 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
-        />
-
-        {customDomain && (
-          <div className="flex flex-col gap-2 rounded-md bg-bg-alt p-4">
-            <p className="text-small text-text-secondary">
-              아래 CNAME 레코드를 도메인 DNS 설정에 추가해주세요.
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-small text-text">{mockDomain.cnameTarget}</span>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="h-8 rounded-sm border border-border px-2.5 text-caption font-medium text-text hover:bg-bg"
-              >
-                {copied ? "복사됨" : "복사"}
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-caption font-medium ${sslClass}`}>
-                SSL {sslLabel}
-              </span>
-              <span className="text-caption text-text-muted">DNS 반영까지 최대 24시간 걸릴 수 있어요</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
+// issue #2 API spec has no /api/testimonials endpoint — stays mock-only until
+// API-Bee/PM-Bee add one.
 function TestimonialsTab() {
   const [list, setList] = useState(mockTestimonialList.map((item) => ({ ...item })));
   const [showSavedToast, setShowSavedToast] = useState(false);
