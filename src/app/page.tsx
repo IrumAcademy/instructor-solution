@@ -21,25 +21,32 @@ export default function LandingPage() {
       <p className="max-w-xl text-balance text-body text-text-secondary">
         {instructor.bio}
       </p>
+      {/* 영상/과정/문의 화면(이슈 #3 화면 2~4)이 병합되기 전까지는 비활성 처리 — 404 방지 */}
       <nav className="flex flex-wrap justify-center gap-3">
-        <a
-          href="/inquiry"
-          className="flex min-h-11 items-center rounded-md bg-accent px-5 text-small font-medium text-white transition-colors hover:bg-accent-hover"
+        <button
+          type="button"
+          disabled
+          title="준비 중입니다"
+          className="flex min-h-11 cursor-not-allowed items-center rounded-md bg-accent px-5 text-small font-medium text-white opacity-50"
         >
           문의하기
-        </a>
-        <a
-          href="/videos"
-          className="flex min-h-11 items-center rounded-md bg-primary px-5 text-small font-medium text-white transition-colors hover:bg-primary-hover"
+        </button>
+        <button
+          type="button"
+          disabled
+          title="준비 중입니다"
+          className="flex min-h-11 cursor-not-allowed items-center rounded-md bg-primary px-5 text-small font-medium text-white opacity-50"
         >
           영상 보기
-        </a>
-        <a
-          href="/courses"
-          className="flex min-h-11 items-center rounded-md border border-border bg-bg px-5 text-small font-medium text-text transition-colors hover:bg-bg-alt"
+        </button>
+        <button
+          type="button"
+          disabled
+          title="준비 중입니다"
+          className="flex min-h-11 cursor-not-allowed items-center rounded-md border border-border bg-bg px-5 text-small font-medium text-text opacity-50"
         >
           과정 보기
-        </a>
+        </button>
       </nav>
     </main>
   );
