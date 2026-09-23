@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, toPositiveIntId } from "@/lib/api";
 
 type FieldErrors = {
   name?: string;
@@ -59,6 +59,7 @@ function InquiriesPageContent() {
 
     setStatus("submitting");
     try {
+      const courseIdNum = toPositiveIntId(courseId);
       const res = await fetch(`${API_BASE_URL}/api/inquiries`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,7 +67,7 @@ function InquiriesPageContent() {
           name,
           contact,
           message,
-          ...(courseId ? { courseId } : {}),
+          ...(courseIdNum !== undefined ? { courseId: courseIdNum } : {}),
         }),
       });
       if (!res.ok) throw new Error("submit failed");
