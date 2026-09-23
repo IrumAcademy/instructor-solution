@@ -97,8 +97,15 @@ router.post('/', requireAuth, async (c) => {
     .prepare('SELECT * FROM video_sources WHERE instructor_id = ? AND provider = ?')
     .get(instructorId, provider);
 
+  // The video_sources row above is already committed at this point -- the
+  // channel is connected regardless of whether the first sync succeeds.
+  // Always answer 201 (a row really was created/updated) and surface a sync
+  // failure via `syncError` in the body instead of an HTTP error status, so
+  // the status code doesn't contradict what's actually in the database
+  // (PM-Bee finding: a bad channelId returned 502 but still left a
+  // connected row, which callers reasonably read as "connection failed").
+  const budget = { remaining: MAX_D1_WRITES_PER_INVOCATION };
   try {
-    const budget = { remaining: MAX_D1_WRITES_PER_INVOCATION };
     const { syncedVideoCount, totalVideoCount, remainingVideoCount } = await syncSource(
       c.env,
       d,
@@ -108,7 +115,7 @@ router.post('/', requireAuth, async (c) => {
     );
     return c.json({ provider, channelId, syncedVideoCount, totalVideoCount, remainingVideoCount }, 201);
   } catch (err) {
-    return c.json({ error: `Connected but sync failed: ${err.message}` }, 502);
+    return c.json({ provider, channelId, syncedVideoCount: 0, syncError: err.message }, 201);
   }
 });
 
