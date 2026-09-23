@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../auth');
+const { isNonEmptyString, isOptionalString } = require('../validate');
 
 const router = express.Router();
 
@@ -27,7 +28,12 @@ router.get('/', (req, res) => {
 
 router.post('/', requireAuth, (req, res) => {
   const { title, description } = req.body || {};
-  if (!title) return res.status(400).json({ error: 'title is required' });
+  if (!isNonEmptyString(title, 200)) {
+    return res.status(400).json({ error: 'title must be a non-empty string (max 200 chars)' });
+  }
+  if (!isOptionalString(description, 5000)) {
+    return res.status(400).json({ error: 'description must be a string (max 5000 chars)' });
+  }
 
   const result = db
     .prepare('INSERT INTO courses (instructor_id, title, description) VALUES (?, ?, ?)')
@@ -44,6 +50,13 @@ router.put('/:id', requireAuth, (req, res) => {
   if (!course) return res.status(404).json({ error: 'Course not found' });
 
   const { title, description } = req.body || {};
+  if (title !== undefined && !isNonEmptyString(title, 200)) {
+    return res.status(400).json({ error: 'title must be a non-empty string (max 200 chars)' });
+  }
+  if (!isOptionalString(description, 5000)) {
+    return res.status(400).json({ error: 'description must be a string (max 5000 chars)' });
+  }
+
   db.prepare('UPDATE courses SET title = ?, description = ? WHERE id = ?').run(
     title ?? course.title,
     description ?? course.description,

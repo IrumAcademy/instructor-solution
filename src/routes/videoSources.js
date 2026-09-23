@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth } = require('../auth');
 const youtube = require('../services/youtube');
 const vimeo = require('../services/vimeo');
+const { isNonEmptyString } = require('../validate');
 
 const router = express.Router();
 
@@ -28,8 +29,8 @@ async function syncSource(instructorId, source) {
 
 router.post('/', requireAuth, async (req, res) => {
   const { provider, channelId } = req.body || {};
-  if (!['youtube', 'vimeo'].includes(provider) || !channelId) {
-    return res.status(400).json({ error: 'provider must be "youtube" or "vimeo", channelId is required' });
+  if (!['youtube', 'vimeo'].includes(provider) || !isNonEmptyString(channelId, 200)) {
+    return res.status(400).json({ error: 'provider must be "youtube" or "vimeo", channelId must be a non-empty string' });
   }
 
   db.prepare(`

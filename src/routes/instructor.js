@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../auth');
+const { isOptionalString } = require('../validate');
 
 const router = express.Router();
 
@@ -21,6 +22,15 @@ router.get('/', (req, res) => {
 
 router.put('/', requireAuth, (req, res) => {
   const { name, bio, avatarUrl, tagline } = req.body || {};
+  if (
+    !isOptionalString(name, 100) ||
+    !isOptionalString(bio, 5000) ||
+    !isOptionalString(avatarUrl, 2000) ||
+    !isOptionalString(tagline, 200)
+  ) {
+    return res.status(400).json({ error: 'name, bio, avatarUrl, tagline must be strings within length limits' });
+  }
+
   const instructor = db.prepare('SELECT * FROM instructors WHERE id = ?').get(req.instructorId);
   if (!instructor) return res.status(404).json({ error: 'Instructor not found' });
 
