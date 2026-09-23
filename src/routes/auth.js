@@ -1,13 +1,14 @@
 const express = require('express');
 const db = require('../db');
 const { verifyPassword, signToken } = require('../auth');
+const { isNonEmptyString } = require('../validate');
 
 const router = express.Router();
 
 router.post('/login', (req, res) => {
   const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'email and password are required' });
+  if (!isNonEmptyString(email) || !isNonEmptyString(password)) {
+    return res.status(400).json({ error: 'email and password must be non-empty strings' });
   }
 
   const instructor = db.prepare('SELECT * FROM instructors WHERE email = ?').get(email);
