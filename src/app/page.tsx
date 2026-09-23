@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { mockInstructor } from "@/lib/mock-instructor";
 import { courses, courseLevelBadgeClass, stats, testimonials, timeline } from "@/lib/landing-content";
 
@@ -129,14 +130,12 @@ export default function LandingPage() {
         >
           문의하기
         </button>
-        <button
-          type="button"
-          disabled
-          title="준비 중입니다"
-          className="flex min-h-11 cursor-not-allowed items-center rounded-md bg-primary px-5 text-small font-medium text-white opacity-50"
+        <Link
+          href="/videos"
+          className="flex min-h-11 items-center rounded-md bg-primary px-5 text-small font-medium text-white transition-colors hover:bg-primary-hover"
         >
           영상 보기
-        </button>
+        </Link>
         <a
           href="#courses"
           className="flex min-h-11 items-center rounded-md border border-border bg-bg px-5 text-small font-medium text-text transition-colors hover:bg-bg-alt"
