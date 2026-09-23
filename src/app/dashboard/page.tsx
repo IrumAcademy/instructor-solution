@@ -60,6 +60,15 @@ export default function DashboardPage() {
                 </button>
               </li>
             ))}
+            <li>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex h-11 w-full items-center px-4 text-body text-text-secondary"
+              >
+                로그아웃
+              </button>
+            </li>
           </ul>
         )}
       </div>
@@ -593,8 +602,15 @@ function YoutubeTab() {
             >
               지금 동기화
             </button>
-            <button type="button" onClick={() => setConnected(false)} className="text-small font-medium text-error">
-              연동 해제
+            {/* No DELETE endpoint in the API spec — this only resets the local UI
+                back to the connect form so a different channel can be POSTed.
+                It does not remove the existing connection from the backend. */}
+            <button
+              type="button"
+              onClick={() => setConnected(false)}
+              className="text-small font-medium text-primary hover:underline"
+            >
+              채널 변경
             </button>
           </div>
         </div>
