@@ -2,16 +2,18 @@
 // No backend yet — swap for real fetch/mutate once /api/instructor + /api/courses
 // (issue #2 API spec, now merged per API-Bee) land here in a follow-up commit.
 import { mockInstructor } from "./mock-instructor";
-import { courses } from "./landing-content";
+import { courses, testimonials } from "./landing-content";
 
-export type DashboardTab = "profile" | "courses" | "youtube" | "domain";
+export type DashboardTab = "profile" | "courses" | "youtube" | "testimonials";
 
 export const dashboardNavItems: { id: DashboardTab; label: string }[] = [
   { id: "profile", label: "프로필" },
   { id: "courses", label: "강의" },
   { id: "youtube", label: "유튜브 연동" },
-  { id: "domain", label: "도메인" },
+  { id: "testimonials", label: "후기" },
 ];
+
+export const mockTestimonialList = testimonials;
 
 export const mockProfile = {
   ...mockInstructor,

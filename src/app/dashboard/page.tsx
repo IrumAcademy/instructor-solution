@@ -6,6 +6,7 @@ import {
   dashboardNavItems,
   mockDomain,
   mockProfile,
+  mockTestimonialList,
   mockYoutubeChannel,
   type DashboardTab,
   mockCourseList,
@@ -88,7 +89,7 @@ export default function DashboardPage() {
         ) : activeTab === "youtube" ? (
           <YoutubeTab />
         ) : (
-          <DomainTab />
+          <TestimonialsTab />
         )}
       </div>
     </main>
@@ -362,6 +363,10 @@ function YoutubeTab() {
   );
 }
 
+// Shelved for now — issue #3 pilot scope excludes custom domains (subdomain only).
+// Not deleted, not exported (page.tsx only allows Next's reserved exports):
+// reusable once the full SaaS multi-tenant domain feature ships.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function DomainTab() {
   const [customDomain, setCustomDomain] = useState("");
   const [copied, setCopied] = useState(false);
@@ -425,5 +430,91 @@ function DomainTab() {
         )}
       </div>
     </div>
+  );
+}
+
+function TestimonialsTab() {
+  const [list, setList] = useState(mockTestimonialList.map((item) => ({ ...item })));
+  const [showSavedToast, setShowSavedToast] = useState(false);
+
+  function updateField(index: number, field: "quote" | "name" | "course", value: string) {
+    setList((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+  }
+
+  function removeItem(index: number) {
+    setList((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addItem() {
+    setList((prev) => [...prev, { quote: "", name: "", course: "" }]);
+  }
+
+  function handleSave(e: FormEvent) {
+    e.preventDefault();
+    setShowSavedToast(true);
+    setTimeout(() => setShowSavedToast(false), 2000);
+  }
+
+  return (
+    <form onSubmit={handleSave} className="flex flex-col gap-6 pb-20">
+      <div className="flex items-center justify-between">
+        <h1 className="text-h1 font-bold text-text">후기</h1>
+        <button
+          type="button"
+          onClick={addItem}
+          className="flex h-10 items-center rounded-md bg-primary px-4 text-small font-medium text-white hover:bg-primary-hover"
+        >
+          + 후기 추가
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {list.map((item, index) => (
+          <div key={index} className="flex flex-col gap-3 rounded-md border border-border bg-bg p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <textarea
+                value={item.quote}
+                onChange={(e) => updateField(index, "quote", e.target.value)}
+                rows={3}
+                placeholder="후기 내용"
+                className="flex-1 rounded-sm border border-border px-3 py-2 text-body text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+              />
+              <button
+                type="button"
+                aria-label="삭제"
+                onClick={() => removeItem(index)}
+                className="text-text-secondary hover:text-error"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <input
+                value={item.name}
+                onChange={(e) => updateField(index, "name", e.target.value)}
+                placeholder="이름"
+                className="h-9 flex-1 rounded-sm border border-border px-3 text-small text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+              />
+              <input
+                value={item.course}
+                onChange={(e) => updateField(index, "course", e.target.value)}
+                placeholder="수강 과정"
+                className="h-9 flex-1 rounded-sm border border-border px-3 text-small text-text focus:border-primary focus:outline-none focus:ring-3 focus:ring-primary-light"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 flex items-center justify-end gap-3 border-t border-border bg-bg px-4 py-3 md:static md:border-0 md:px-0 md:py-0">
+        {showSavedToast && <span className="text-small text-success">저장되었습니다</span>}
+        <button
+          type="submit"
+          className="flex h-11 items-center justify-center rounded-md bg-primary px-5 text-small font-medium text-white hover:bg-primary-hover"
+        >
+          저장
+        </button>
+      </div>
+    </form>
   );
 }
