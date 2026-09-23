@@ -1,8 +1,8 @@
 const API_BASE = 'https://api.vimeo.com';
 
-async function fetchVideos(userId) {
-  const token = process.env.VIMEO_ACCESS_TOKEN;
-  if (!token) throw new Error('VIMEO_ACCESS_TOKEN env var is not set');
+async function fetchVideos(userId, env) {
+  const token = env.VIMEO_ACCESS_TOKEN;
+  if (!token) throw new Error('VIMEO_ACCESS_TOKEN is not set');
 
   const videos = [];
   let url = `${API_BASE}/users/${encodeURIComponent(userId)}/videos?per_page=50`;

@@ -1,8 +1,8 @@
 const API_BASE = 'https://www.googleapis.com/youtube/v3';
 
-async function fetchVideos(channelId) {
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) throw new Error('YOUTUBE_API_KEY env var is not set');
+async function fetchVideos(channelId, env) {
+  const apiKey = env.YOUTUBE_API_KEY;
+  if (!apiKey) throw new Error('YOUTUBE_API_KEY is not set');
 
   const channelUrl = `${API_BASE}/channels?part=contentDetails&id=${encodeURIComponent(channelId)}&key=${apiKey}`;
   const channelRes = await fetch(channelUrl);

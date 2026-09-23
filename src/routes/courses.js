@@ -1,79 +1,81 @@
-const express = require('express');
-const db = require('../db');
+const { Hono } = require('hono');
+const { db } = require('../db');
 const { requireAuth } = require('../auth');
 const { isNonEmptyString, isOptionalString } = require('../validate');
 
-const router = express.Router();
+const router = new Hono();
 
-function videoIdsFor(courseId) {
-  return db
-    .prepare('SELECT id FROM videos WHERE course_id = ? ORDER BY created_at DESC')
-    .all(courseId)
-    .map((r) => r.id);
+async function videoIdsFor(d, courseId) {
+  const rows = await d.prepare('SELECT id FROM videos WHERE course_id = ? ORDER BY created_at DESC').all(courseId);
+  return rows.map((r) => r.id);
 }
 
-function toPublic(course) {
+async function toPublic(d, course) {
   return {
     id: course.id,
     title: course.title,
     description: course.description,
-    videoIds: videoIdsFor(course.id),
+    videoIds: await videoIdsFor(d, course.id),
   };
 }
 
-router.get('/', (req, res) => {
-  const rows = db.prepare('SELECT * FROM courses ORDER BY created_at DESC').all();
-  res.json(rows.map(toPublic));
+router.get('/', async (c) => {
+  const d = db(c.env.DB);
+  const rows = await d.prepare('SELECT * FROM courses ORDER BY created_at DESC').all();
+  return c.json(await Promise.all(rows.map((row) => toPublic(d, row))));
 });
 
-router.post('/', requireAuth, (req, res) => {
-  const { title, description } = req.body || {};
+router.post('/', requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const { title, description } = body || {};
   if (!isNonEmptyString(title, 200)) {
-    return res.status(400).json({ error: 'title must be a non-empty string (max 200 chars)' });
+    return c.json({ error: 'title must be a non-empty string (max 200 chars)' }, 400);
   }
   if (!isOptionalString(description, 5000)) {
-    return res.status(400).json({ error: 'description must be a string (max 5000 chars)' });
+    return c.json({ error: 'description must be a string (max 5000 chars)' }, 400);
   }
 
-  const result = db
+  const d = db(c.env.DB);
+  const result = await d
     .prepare('INSERT INTO courses (instructor_id, title, description) VALUES (?, ?, ?)')
-    .run(req.instructorId, title, description || '');
+    .run(c.get('instructorId'), title, description || '');
 
-  const course = db.prepare('SELECT * FROM courses WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(toPublic(course));
+  const course = await d.prepare('SELECT * FROM courses WHERE id = ?').get(result.lastInsertRowid);
+  return c.json(await toPublic(d, course), 201);
 });
 
-router.put('/:id', requireAuth, (req, res) => {
-  const course = db
+router.put('/:id', requireAuth, async (c) => {
+  const d = db(c.env.DB);
+  const course = await d
     .prepare('SELECT * FROM courses WHERE id = ? AND instructor_id = ?')
-    .get(req.params.id, req.instructorId);
-  if (!course) return res.status(404).json({ error: 'Course not found' });
+    .get(c.req.param('id'), c.get('instructorId'));
+  if (!course) return c.json({ error: 'Course not found' }, 404);
 
-  const { title, description } = req.body || {};
+  const body = await c.req.json().catch(() => ({}));
+  const { title, description } = body || {};
   if (title !== undefined && !isNonEmptyString(title, 200)) {
-    return res.status(400).json({ error: 'title must be a non-empty string (max 200 chars)' });
+    return c.json({ error: 'title must be a non-empty string (max 200 chars)' }, 400);
   }
   if (!isOptionalString(description, 5000)) {
-    return res.status(400).json({ error: 'description must be a string (max 5000 chars)' });
+    return c.json({ error: 'description must be a string (max 5000 chars)' }, 400);
   }
 
-  db.prepare('UPDATE courses SET title = ?, description = ? WHERE id = ?').run(
-    title ?? course.title,
-    description ?? course.description,
-    course.id
-  );
+  await d
+    .prepare('UPDATE courses SET title = ?, description = ? WHERE id = ?')
+    .run(title ?? course.title, description ?? course.description, course.id);
 
-  res.json(toPublic(db.prepare('SELECT * FROM courses WHERE id = ?').get(course.id)));
+  return c.json(await toPublic(d, await d.prepare('SELECT * FROM courses WHERE id = ?').get(course.id)));
 });
 
-router.delete('/:id', requireAuth, (req, res) => {
-  const course = db
+router.delete('/:id', requireAuth, async (c) => {
+  const d = db(c.env.DB);
+  const course = await d
     .prepare('SELECT * FROM courses WHERE id = ? AND instructor_id = ?')
-    .get(req.params.id, req.instructorId);
-  if (!course) return res.status(404).json({ error: 'Course not found' });
+    .get(c.req.param('id'), c.get('instructorId'));
+  if (!course) return c.json({ error: 'Course not found' }, 404);
 
-  db.prepare('DELETE FROM courses WHERE id = ?').run(course.id);
-  res.status(204).end();
+  await d.prepare('DELETE FROM courses WHERE id = ?').run(course.id);
+  return c.body(null, 204);
 });
 
 module.exports = router;

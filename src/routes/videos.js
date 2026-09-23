@@ -1,17 +1,18 @@
-const express = require('express');
-const db = require('../db');
+const { Hono } = require('hono');
+const { db } = require('../db');
 
-const router = express.Router();
+const router = new Hono();
 
-router.get('/', (req, res) => {
-  const rows = db
+router.get('/', async (c) => {
+  const d = db(c.env.DB);
+  const rows = await d
     .prepare(
       `SELECT id, provider, external_id, title, thumbnail_url, embed_url, course_id
        FROM videos ORDER BY created_at DESC`
     )
     .all();
 
-  res.json(
+  return c.json(
     rows.map((v) => ({
       id: v.id,
       provider: v.provider,
