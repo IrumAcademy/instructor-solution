@@ -1,0 +1,4 @@
+node_modules/
+
+# omc state (agent tooling, not project source)
+.omc/
