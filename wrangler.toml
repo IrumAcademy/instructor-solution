@@ -1,0 +1,8 @@
+name = "instructor-solution-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "instructor-solution"
+database_id = "105dd703-4639-4efd-bc57-518184ebdce2"
